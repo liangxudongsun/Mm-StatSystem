@@ -4,9 +4,9 @@ namespace GAS.AbilitySystem
 {
     public class MyAbility : GameplayAbility
     {
-        public override void Activate(StatController statController)
+        public override void Activate(AbilityContext context)
         {
-            base.Activate(statController);
+            base.Activate(context);
         }
     }
 }

@@ -18,7 +18,7 @@ namespace GAS.AbilitySystem
         [SerializeField] private GameplayEffectData healEffect;
         [SerializeField] private GameObject healEffectPrefab;
 
-        public override void Activate(StatController statController)
+        public override void Activate(AbilityContext context)
         {
             Debug.Log($"[治疗] 激活技能");
 
@@ -29,7 +29,7 @@ namespace GAS.AbilitySystem
             }
 
             // 通过ASC应用到自身
-            var asc = statController.GetComponent<AbilitySystemComponent>();
+            var asc = context.Owner;
             if (asc == null)
             {
                 Debug.LogWarning("[治疗] 未找到AbilitySystemComponent!");
@@ -45,10 +45,10 @@ namespace GAS.AbilitySystem
             if (healEffectPrefab != null)
             {
                 var owner = asc.transform;
-                var spawnTask = Task_SpawnEffect.SpawnEffect(asc)
+                var spawnTask = context.RegisterTask(Task_SpawnEffect.SpawnEffect(asc)
                     .SetEffectPrefab(healEffectPrefab)
                     .SetLocation(owner.position)
-                    .SetDuration(1f);
+                    .SetDuration(1f));
                 spawnTask.Start();
             }
 

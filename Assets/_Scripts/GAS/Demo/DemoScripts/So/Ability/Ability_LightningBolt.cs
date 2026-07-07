@@ -4,6 +4,7 @@ using GAS.Core;
 using GAS.Core.GameplayEffect;
 using GAS.StateSystem;
 using GAS.TaskSystem;
+using GAS.Targeting;
 using UnityEngine;
 
 namespace GAS.AbilitySystem
@@ -24,43 +25,66 @@ namespace GAS.AbilitySystem
         [Header("伤害设置")]
         [SerializeField] private GameplayEffectData damageEffect;
 
-        // 任务引用
-        private Task_MoveToTarget _moveTask;
-
-        public override void Activate(StatController statController)
+        public override void Activate(AbilityContext context)
         {
             Debug.Log($"[雷电球] 激活技能");
 
             // 获取目标
-            var player = statController.GetComponent<Demo_Player>();
+            var player = context.StatController.GetComponent<Demo_Player>();
             if (player == null)
             {
                 Debug.LogWarning("[雷电球] 未找到Demo_Player组件!");
                 return;
             }
 
-            Transform target = player.GetCurrentTarget();
-            if (target == null)
-            {
-                Debug.LogWarning("[雷电球] 未选中目标!");
-                return;
-            }
-
             // 获取ASC
-            var asc = player.GetAbilitySystemComponent();
+            var asc = context.Owner;
             if (asc == null)
             {
                 Debug.LogWarning("[雷电球] 未找到AbilitySystemComponent!");
                 return;
             }
 
+            Transform target = player.GetCurrentTarget();
+            AbilitySystemComponent targetASC = null;
+
+            if (target != null)
+            {
+                targetASC = target.GetComponent<AbilitySystemComponent>();
+                if (!TargetingSystem.IsValidTarget(asc, targetASC, true))
+                {
+                    target = null;
+                    targetASC = null;
+                }
+            }
+
+            if (target == null)
+            {
+                var targetData = TargetingSystem.GetTargetData(
+                    asc,
+                    TargetType.SingleEnemy,
+                    asc.transform.position,
+                    asc.transform.forward,
+                    30f);
+
+                targetASC = targetData.SingleTarget;
+                target = targetASC != null ? targetASC.transform : null;
+            }
+
+            if (target == null || targetASC == null)
+            {
+                Debug.LogWarning("[雷电球] 未选中目标!");
+                return;
+            }
+
             // 启动异步任务
-            ExecuteLightningBolt(asc, target).Forget();
+            ExecuteLightningBolt(context, target, targetASC).Forget();
         }
 
-        private async UniTask ExecuteLightningBolt(AbilitySystemComponent asc, Transform target)
+        private async UniTask ExecuteLightningBolt(AbilityContext context, Transform target, AbilitySystemComponent targetASC)
         {
             // 1. 在玩家前方生成投射物
+            var asc = context.Owner;
             var ownerTransform = asc.transform;
             // 计算生成位置：玩家位置 + 玩家朝向 * 1.5f（前方一点）
             Vector3 spawnPosition = ownerTransform.position + ownerTransform.forward * 1.5f;
@@ -68,10 +92,10 @@ namespace GAS.AbilitySystem
             
             GameObject projectile = null;
 
-            var spawnTask = Task_SpawnEffect.SpawnEffect(asc)
+            var spawnTask = context.RegisterTask(Task_SpawnEffect.SpawnEffect(asc)
                 .SetEffectPrefab(projectilePrefab)
                 .SetLocation(spawnPosition)
-                .SetDuration(-1); // 不自动销毁
+                .SetDuration(-1)); // 不自动销毁
             spawnTask.Start();
             await UniTask.WaitUntil(() => spawnTask.IsEnded, cancellationToken: spawnTask.CancellationToken);
             projectile = spawnTask.SpawnedEffect;
@@ -88,7 +112,7 @@ namespace GAS.AbilitySystem
             }
 
             // 2. 等待0.5秒
-            await UniTask.Delay((int)(delayBeforeLaunch * 1000), cancellationToken: asc.GetCancellationTokenOnDestroy());
+            await UniTask.Delay((int)(delayBeforeLaunch * 1000), cancellationToken: context.CancellationToken);
 
             if (projectile == null || target == null)
             {
@@ -96,43 +120,33 @@ namespace GAS.AbilitySystem
             }
 
             // 3. 飞向目标
-            _moveTask = Task_MoveToTarget.MoveToTarget(asc)
+            var moveTask = context.RegisterTask(Task_MoveToTarget.MoveToTarget(asc)
                 .SetTarget(target)
                 .SetProjectile(projectile)
                 .SetSpeed(projectileSpeed)
                 .SetArriveDistance(arriveDistance)
-                .SetDestroyOnArrive(false);
-            _moveTask.Start();
-            await UniTask.WaitUntil(() => _moveTask.IsEnded, cancellationToken: asc.GetCancellationTokenOnDestroy());
+                .SetDestroyOnArrive(false));
+            moveTask.Start();
+            await UniTask.WaitUntil(() => moveTask.IsEnded, cancellationToken: context.CancellationToken);
 
             // 4. 命中目标
             if (projectile != null && target != null)
             {
                 // 应用伤害GE
-                var enemyASC = target.GetComponent<AbilitySystemComponent>();
-                if (enemyASC != null && damageEffect != null)
+                if (targetASC != null && damageEffect != null)
                 {
-                    enemyASC.ApplyGE(damageEffect, asc.transform);
+                    targetASC.ApplyGE(damageEffect, asc.transform);
                 }
 
                 // 生成命中特效
-                var hitTask = Task_SpawnEffect.SpawnEffect(asc)
+                var hitTask = context.RegisterTask(Task_SpawnEffect.SpawnEffect(asc)
                     .SetEffectPrefab(hitEffectPrefab)
                     .SetTarget(target)
-                    .SetDuration(0.5f);
+                    .SetDuration(0.5f));
                 hitTask.Start();
 
                 // 销毁投射物
                 Destroy(projectile);
-            }
-        }
-
-        public override void InterruptTask()
-        {
-            base.InterruptTask();
-            if (_moveTask != null)
-            {
-                _moveTask.InterruptTask();
             }
         }
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GAS.Component;
 using GAS.Core.GameplayEffect;
 using GAS.StateSystem;
 using Sirenix.OdinInspector;
@@ -17,9 +18,24 @@ namespace GAS.Core
         //现有GE表
         private List<GameplayEffectSpec> appliedEffectList = new();
 
+        /// <summary>
+        /// GE标签引用计数字典
+        /// </summary>
+        private readonly Dictionary<string, int> gameplayTagCountDict = new(StringComparer.OrdinalIgnoreCase);
+
         // 外部传入的 StatController
         private StatController statController;
         public void SetStatController(StatController sc) => statController = sc;
+
+        /// <summary>
+        /// 所属能力组件
+        /// </summary>
+        private AbilitySystemComponent owner;
+
+        /// <summary>
+        /// 设置所属能力组件
+        /// </summary>
+        public void SetOwner(AbilitySystemComponent asc) => owner = asc;
 
         #region 公开接口
 
@@ -30,6 +46,7 @@ namespace GAS.Core
         {
             if (effectData is null) { Debug.Log("GE为空"); return null; }
             if (statController is null) { Debug.Log("StatController 未设置"); return null; }
+            if (!CanApplyGE(effectData)) { Debug.Log($"[GEManager] 标签条件不满足: {effectData.name}"); return null; }
 
             Debug.Log($"[GEManager] ApplyGE: {effectData.name}, IsInstant={effectData.IsInstant}");
 
@@ -54,6 +71,7 @@ namespace GAS.Core
 
             //4.持续效果：加入列表
             appliedEffectList.Add(newSpec);
+            AddGrantedTags(effectData);
             ApplyModifiersToStat(newSpec);
 
             return newSpec;
@@ -272,7 +290,68 @@ namespace GAS.Core
         {
             appliedEffectList.RemoveAt(index);
             ApplyModifiersToStat(spec, isRemove: true);  // 移除修饰符
+            RemoveGrantedTags(spec.GEData);
             Debug.Log($"[GE] {spec.GEData.name} 已移除");
+        }
+
+        #endregion
+
+        #region 标签生命周期
+
+        /// <summary>
+        /// GE是否满足标签条件
+        /// </summary>
+        private bool CanApplyGE(GameplayEffectData effectData)
+        {
+            if (owner is null) return true;
+
+            return owner.SatisfiesTagRequirements(effectData.RequiredNeedTags, effectData.RequiredBanTags);
+        }
+
+        /// <summary>
+        /// 添加GE授予标签
+        /// </summary>
+        private void AddGrantedTags(GameplayEffectData effectData)
+        {
+            if (owner is null) return;
+
+            foreach (string tagName in effectData.GameplayTags)
+            {
+                if (string.IsNullOrWhiteSpace(tagName)) continue;
+
+                gameplayTagCountDict.TryGetValue(tagName, out int count);
+                gameplayTagCountDict[tagName] = count + 1;
+
+                if (count == 0)
+                {
+                    owner.AddGameplayTag(tagName);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 移除GE授予标签
+        /// </summary>
+        private void RemoveGrantedTags(GameplayEffectData effectData)
+        {
+            if (owner is null) return;
+
+            foreach (string tagName in effectData.GameplayTags)
+            {
+                if (string.IsNullOrWhiteSpace(tagName)) continue;
+                if (!gameplayTagCountDict.TryGetValue(tagName, out int count)) continue;
+
+                count--;
+                if (count <= 0)
+                {
+                    gameplayTagCountDict.Remove(tagName);
+                    owner.RemoveGameplayTag(tagName);
+                }
+                else
+                {
+                    gameplayTagCountDict[tagName] = count;
+                }
+            }
         }
 
         #endregion

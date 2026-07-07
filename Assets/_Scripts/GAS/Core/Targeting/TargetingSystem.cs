@@ -47,7 +47,7 @@ namespace GAS.Targeting
 
                 case TargetType.SingleEnemy:
                 case TargetType.SingleAlly:
-                    var single = GetSingleTarget(caster, origin, direction, radius, isEnemy);
+                    var single = GetSingleTarget(caster, origin, direction, radius, isEnemy, layerMask);
                     if (single != null)
                         targetData.TargetList.Add(single);
                     break;
@@ -55,20 +55,20 @@ namespace GAS.Targeting
                 case TargetType.AreaEnemy:
                 case TargetType.AreaAlly:
                 case TargetType.AreaAll:
-                    targetData.TargetList.AddRange(GetSphereTargets(caster, origin, radius, isEnemy));
+                    targetData.TargetList.AddRange(GetSphereTargets(caster, origin, radius, isEnemy, layerMask));
                     break;
 
                 case TargetType.ConeEnemy:
                 case TargetType.ConeAlly:
                 case TargetType.ConeAll:
-                    targetData.TargetList.AddRange(GetConeTargets(caster, origin, direction, radius, angle, isEnemy));
+                    targetData.TargetList.AddRange(GetConeTargets(caster, origin, direction, radius, angle, isEnemy, layerMask));
                     break;
 
                 case TargetType.BoxEnemy:
                 case TargetType.BoxAlly:
                 case TargetType.BoxAll:
                     var size = boxSize ?? new Vector3(radius * 2, 2, radius);
-                    targetData.TargetList.AddRange(GetBoxTargets(caster, origin, direction, size, isEnemy));
+                    targetData.TargetList.AddRange(GetBoxTargets(caster, origin, direction, size, isEnemy, layerMask));
                     break;
 
                 case TargetType.Cursor:
@@ -88,12 +88,15 @@ namespace GAS.Targeting
             AbilitySystemComponent caster,
             Vector3 center,
             float radius,
-            bool? isEnemy)
+            bool? isEnemy,
+            LayerMask layerMask = default)
         {
             var targets = new List<AbilitySystemComponent>();
             int maxHits = 20;
             var buffer = new Collider[maxHits];
-            int count = Physics.OverlapSphereNonAlloc(center, radius, buffer);
+            int count = layerMask.value == 0
+                ? Physics.OverlapSphereNonAlloc(center, radius, buffer)
+                : Physics.OverlapSphereNonAlloc(center, radius, buffer, layerMask);
 
             for (int i = 0; i < count; i++)
             {
@@ -115,13 +118,16 @@ namespace GAS.Targeting
             Vector3 direction,
             float radius,
             float angle,
-            bool? isEnemy)
+            bool? isEnemy,
+            LayerMask layerMask = default)
         {
             var targets = new List<AbilitySystemComponent>();
             
             int maxHits = 20;
             var buffer = new Collider[maxHits];
-            int count = Physics.OverlapSphereNonAlloc(origin, radius, buffer);
+            int count = layerMask.value == 0
+                ? Physics.OverlapSphereNonAlloc(origin, radius, buffer)
+                : Physics.OverlapSphereNonAlloc(origin, radius, buffer, layerMask);
 
             for (int i = 0; i < count; i++)
             {
@@ -148,7 +154,8 @@ namespace GAS.Targeting
             Vector3 origin,
             Vector3 direction,
             Vector3 size,
-            bool? isEnemy)
+            bool? isEnemy,
+            LayerMask layerMask = default)
         {
             var targets = new List<AbilitySystemComponent>();
             
@@ -157,7 +164,9 @@ namespace GAS.Targeting
             
             Quaternion rotation = Quaternion.LookRotation(direction);
             Vector3 center = origin + direction * size.z / 2;
-            int count = Physics.OverlapBoxNonAlloc(center, size / 2, buffer, rotation);
+            int count = layerMask.value == 0
+                ? Physics.OverlapBoxNonAlloc(center, size / 2, buffer, rotation)
+                : Physics.OverlapBoxNonAlloc(center, size / 2, buffer, rotation, layerMask);
 
             for (int i = 0; i < count; i++)
             {
@@ -178,12 +187,15 @@ namespace GAS.Targeting
             Vector3 origin,
             Vector3 direction,
             float radius,
-            bool? isEnemy)
+            bool? isEnemy,
+            LayerMask layerMask = default)
         {
             // 使用 NonAlloc 版本
             int maxHits = 50;
             var buffer = new Collider[maxHits];
-            int count = Physics.OverlapSphereNonAlloc(origin, radius, buffer);
+            int count = layerMask.value == 0
+                ? Physics.OverlapSphereNonAlloc(origin, radius, buffer)
+                : Physics.OverlapSphereNonAlloc(origin, radius, buffer, layerMask);
             
             AbilitySystemComponent bestTarget = null;
             float closestDistance = float.MaxValue;
@@ -219,9 +231,23 @@ namespace GAS.Targeting
             if (caster == null || target == null || caster == target)
                 return false;
 
-            // TODO: 需要根据阵营系统或 GameplayTag 判断敌我
-            // 目前简单返回 true，实际需要结合 GameplayTagContainer 判断
-            return true;
+            if (!isEnemy.HasValue)
+                return true;
+
+            bool casterIsPlayer = caster.HasGameplayTag("Faction.Player");
+            bool casterIsEnemy = caster.HasGameplayTag("Faction.Enemy");
+            bool targetIsPlayer = target.HasGameplayTag("Faction.Player");
+            bool targetIsEnemy = target.HasGameplayTag("Faction.Enemy");
+
+            if (!casterIsPlayer && !casterIsEnemy && !targetIsPlayer && !targetIsEnemy)
+                return true;
+
+            if (isEnemy.Value)
+            {
+                return casterIsPlayer && targetIsEnemy || casterIsEnemy && targetIsPlayer;
+            }
+
+            return casterIsPlayer && targetIsPlayer || casterIsEnemy && targetIsEnemy;
         }
 
         #endregion

@@ -4,6 +4,7 @@ using GAS.Core;
 using GAS.Core.GameplayEffect;
 using GAS.StateSystem;
 using GAS.TaskSystem;
+using GAS.Targeting;
 using UnityEngine;
 
 namespace GAS.AbilitySystem
@@ -23,42 +24,39 @@ namespace GAS.AbilitySystem
         [SerializeField] private GameplayEffectData blizzardDamageEffect;
         [SerializeField] public float damageInterval = 0.5f;
 
-        private Task_UpdatePosition _followTask;
-        private bool _isRunning;
-
-        public override void Activate(StatController statController)
+        public override void Activate(AbilityContext context)
         {
             Debug.Log($"[暴风雪] 激活技能");
 
-            var player = statController.GetComponent<Demo_Player>();
+            var player = context.StatController.GetComponent<Demo_Player>();
             if (player == null)
             {
                 Debug.LogWarning("[暴风雪] 未找到Demo_Player组件!");
                 return;
             }
 
-            var asc = player.GetAbilitySystemComponent();
+            var asc = context.Owner;
             if (asc == null)
             {
                 Debug.LogWarning("[暴风雪] 未找到AbilitySystemComponent!");
                 return;
             }
 
-            ExecuteBlizzard(asc, player).Forget();
+            ExecuteBlizzard(context, player).Forget();
         }
 
-        private async UniTask ExecuteBlizzard(AbilitySystemComponent asc, Demo_Player player)
+        private async UniTask ExecuteBlizzard(AbilityContext context, Demo_Player player)
         {
-            _isRunning = true;
+            var asc = context.Owner;
             var duration = blizzardDamageEffect.DurationValue;
             var elapsed = 0f;
             GameObject effect = null;
 
             // 1. 生成暴风雪特效 (不设置duration，让技能自己管理生命周期)
             Debug.Log($"[暴风雪] 开始生成特效: prefab={blizzardEffectPrefab}, duration={duration}");
-            var spawnTask = Task_SpawnEffect.SpawnEffect(asc)
+            var spawnTask = context.RegisterTask(Task_SpawnEffect.SpawnEffect(asc)
                 .SetEffectPrefab(blizzardEffectPrefab)
-                .SetLocation(player.GetPosition());
+                .SetLocation(player.GetPosition()));
                 //.SetDuration(duration); // 不设置duration，避免特效被提前销毁
             spawnTask.Start();
             await UniTask.WaitUntil(() => spawnTask.IsEnded, cancellationToken: spawnTask.CancellationToken);
@@ -72,16 +70,16 @@ namespace GAS.AbilitySystem
             }
 
             // 2. 启动跟随任务
-            _followTask = Task_UpdatePosition.UpdatePosition(asc)
+            var followTask = context.RegisterTask(Task_UpdatePosition.UpdatePosition(asc)
                 .SetTarget(player.transform)
                 .SetEffect(effect)
-                .SetKeepYOffset(true);
-            _followTask.Start();
+                .SetKeepYOffset(true));
+            followTask.Start();
 
             // 3. 周期性造成伤害
             var timer = 0f;
-            Debug.Log($"[暴风雪] 开始伤害循环: duration={duration}, _isRunning={_isRunning}");
-            while (elapsed < duration && _isRunning && effect != null)
+            Debug.Log($"[暴风雪] 开始伤害循环: duration={duration}");
+            while (elapsed < duration && !context.IsCancelled && effect != null)
             {
                 await UniTask.Yield();
                 if (effect == null)
@@ -92,7 +90,7 @@ namespace GAS.AbilitySystem
 
                 elapsed += Time.deltaTime;
                 timer += Time.deltaTime;
-                Debug.Log($"[暴风雪] 循环中: elapsed={elapsed}, timer={timer}, _isRunning={_isRunning}");
+                Debug.Log($"[暴风雪] 循环中: elapsed={elapsed}, timer={timer}");
 
                 if (timer >= damageInterval)
                 {
@@ -100,7 +98,7 @@ namespace GAS.AbilitySystem
                     ApplyBlizzardDamage(asc, player.transform.position);
                 }
             }
-            Debug.Log($"[暴风雪] 循环结束: elapsed={elapsed}, duration={duration}, _isRunning={_isRunning}");
+            Debug.Log($"[暴风雪] 循环结束: elapsed={elapsed}, duration={duration}");
 
             // 清理
             if (effect != null)
@@ -108,42 +106,32 @@ namespace GAS.AbilitySystem
                 Destroy(effect);
             }
 
-            _isRunning = false;
             Debug.Log("[暴风雪] 技能结束");
         }
 
         private void ApplyBlizzardDamage(AbilitySystemComponent asc, Vector3 center)
         {
             Debug.Log($"[暴风雪] 开始检测敌人: center={center}, radius={blizzardRadius}, enemyLayer={enemyLayer.value}");
-            var colliders = Physics.OverlapSphere(center, blizzardRadius, enemyLayer);
-            Debug.Log($"[暴风雪] 找到 {colliders.Length} 个物体");
+            var targetData = TargetingSystem.GetTargetData(
+                asc,
+                TargetType.AreaEnemy,
+                center,
+                asc.transform.forward,
+                blizzardRadius,
+                layerMask: enemyLayer);
 
-            foreach (var collider in colliders)
+            Debug.Log($"[暴风雪] 找到 {targetData.TargetList.Count} 个目标");
+
+            foreach (var enemyASC in targetData.TargetList)
             {
-                Debug.Log($"[暴风雪] 检测到: {collider.name}, Layer={LayerMask.LayerToName(collider.gameObject.layer)}");
-                var enemyASC = collider.GetComponent<AbilitySystemComponent>();
                 if (enemyASC != null && blizzardDamageEffect != null)
                 {
-                    Debug.Log($"[暴风雪] 应用GE到 {collider.name}");
+                    Debug.Log($"[暴风雪] 应用GE到 {enemyASC.name}");
                     enemyASC.ApplyGE(blizzardDamageEffect, asc.transform);
                 }
-                else
-                {
-                    Debug.LogWarning($"[暴风雪] {collider.name} 没有AbilitySystemComponent或blizzardDamageEffect为null");
-                }
             }
 
-            Debug.Log($"[暴风雪] 命中 {colliders.Length} 个敌人");
-        }
-
-        public override void InterruptTask()
-        {
-            base.InterruptTask();
-            _isRunning = false;
-            if (_followTask != null)
-            {
-                _followTask.InterruptTask();
-            }
+            Debug.Log($"[暴风雪] 命中 {targetData.TargetList.Count} 个敌人");
         }
     }
 }

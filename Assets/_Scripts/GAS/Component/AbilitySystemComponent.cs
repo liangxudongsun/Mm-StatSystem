@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using GAS.AbilitySystem;
 using GAS.Core;
 using GAS.Core.GameplayEffect;
 using GAS.StateSystem;
+using GAS.TagSystem;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
@@ -16,14 +18,27 @@ namespace GAS.Component
     public class AbilitySystemComponent : MonoBehaviour
     {
         [Header("组件依赖")]
-        [LabelText("GE管理器"), SerializeField] GEManager geManager;
-        [LabelText("属性控制器"), SerializeField] StatController statController;
+        [LabelText("GE管理器"), SerializeField] private GEManager geManager;
+        [LabelText("属性控制器"), SerializeField] private StatController statController;
 
         [Header("技能配置")]
-        [LabelText("初始技能"), SerializeField] List<GameplayAbility> initialAbilities;
+        [LabelText("初始技能"), SerializeField] private List<GameplayAbility> initialAbilities;
+
+        [Header("标签配置")]
+        [LabelText("初始标签"), SerializeField] private string[] initialGameplayTags = Array.Empty<string>();
 
         //可激活的技能列表
         private readonly List<AbilitySpec> activatableAbilities = new();
+
+        /// <summary>
+        /// 当前持有标签
+        /// </summary>
+        private readonly GameplayTagContainer gameplayTagContainer = new();
+
+        /// <summary>
+        /// 当前持有标签
+        /// </summary>
+        public GameplayTagContainer GameplayTags => gameplayTagContainer;
 
         // CancellationToken
         private CancellationTokenSource _cts;
@@ -31,7 +46,9 @@ namespace GAS.Component
         void Awake()
         {
             statController ??= GetComponent<StatController>();
+            geManager ??= GetComponent<GEManager>();
             _cts = new CancellationTokenSource();
+            InitGameplayTags();
         }
 
         void OnDestroy()
@@ -54,6 +71,7 @@ namespace GAS.Component
             if (geManager is not null)
             {
                 geManager.SetStatController(statController);
+                geManager.SetOwner(this);
             }
 
             //初始化技能配置
@@ -94,10 +112,10 @@ namespace GAS.Component
                 if (spec.ability.abilityName == abilityName)
                 {
                     Debug.Log($"[ASC] 找到匹配技能: {abilityName}, 检查CanActivate...");
-                    if (spec.CanActivate(stat))
+                    if (spec.CanActivate(stat, this))
                     {
                         Debug.Log($"[ASC] CanActivate通过，准备激活!");
-                        spec.Activate(stat);
+                        spec.Activate(this, stat);
                         return true;
                     }
                     else
@@ -108,6 +126,81 @@ namespace GAS.Component
             }
             Debug.LogWarning($"[ASC] 未找到可激活的技能: {abilityName}");
             return false;
+        }
+
+        /// <summary>
+        /// 尝试激活技能
+        /// </summary>
+        public bool TryActivateAbility(string abilityName)
+        {
+            return TryActivateAbility(abilityName, statController);
+        }
+
+        #endregion
+
+        #region 标签管理
+
+        /// <summary>
+        /// 初始化标签
+        /// </summary>
+        private void InitGameplayTags()
+        {
+            gameplayTagContainer.Clear();
+
+            foreach (string tagName in initialGameplayTags)
+            {
+                AddGameplayTag(tagName);
+            }
+        }
+
+        /// <summary>
+        /// 添加标签
+        /// </summary>
+        public void AddGameplayTag(string tagName)
+        {
+            if (string.IsNullOrWhiteSpace(tagName)) return;
+
+            gameplayTagContainer.AddTag(new GameplayTag(tagName));
+        }
+
+        /// <summary>
+        /// 移除标签
+        /// </summary>
+        public void RemoveGameplayTag(string tagName)
+        {
+            if (string.IsNullOrWhiteSpace(tagName)) return;
+
+            gameplayTagContainer.RemoveTag(new GameplayTag(tagName));
+        }
+
+        /// <summary>
+        /// 是否持有标签
+        /// </summary>
+        public bool HasGameplayTag(string tagName)
+        {
+            if (string.IsNullOrWhiteSpace(tagName)) return false;
+
+            return gameplayTagContainer.ContainsTag(new GameplayTag(tagName));
+        }
+
+        /// <summary>
+        /// 是否满足标签需求
+        /// </summary>
+        public bool SatisfiesTagRequirements(IEnumerable<string> needTags, IEnumerable<string> banTags)
+        {
+            foreach (string tagName in needTags)
+            {
+                if (string.IsNullOrWhiteSpace(tagName)) continue;
+                if (!HasGameplayTag(tagName)) return false;
+            }
+
+            foreach (string tagName in banTags)
+            {
+                if (string.IsNullOrWhiteSpace(tagName)) continue;
+                if (HasGameplayTag(tagName)) return false;
+            }
+
+            return true;
         }
 
         #endregion
