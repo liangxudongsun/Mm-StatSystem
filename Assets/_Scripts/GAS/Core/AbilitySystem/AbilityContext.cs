@@ -1,8 +1,6 @@
-using System.Collections.Generic;
 using System.Threading;
 using GAS.Component;
 using GAS.StateSystem;
-using GAS.TaskSystem;
 
 namespace GAS.AbilitySystem
 {
@@ -42,11 +40,6 @@ namespace GAS.AbilitySystem
         public bool IsCancelled { get; private set; }
 
         /// <summary>
-        /// 运行中任务列表
-        /// </summary>
-        private readonly List<AbilityTask> activeTaskList = new();
-
-        /// <summary>
         /// 技能运行时上下文
         /// </summary>
         public AbilityContext(AbilitySpec spec, AbilitySystemComponent owner, StatController statController)
@@ -57,30 +50,11 @@ namespace GAS.AbilitySystem
         }
 
         /// <summary>
-        /// 注册运行时任务
+        /// 取消当前施法上下文
         /// </summary>
-        public T RegisterTask<T>(T task) where T : AbilityTask
-        {
-            if (task is null) return null;
-
-            activeTaskList.Add(task);
-            return task;
-        }
-
-        /// <summary>
-        /// 取消所有运行时任务
-        /// </summary>
-        public void CancelActiveTasks()
+        public void Cancel()
         {
             IsCancelled = true;
-
-            for (int i = activeTaskList.Count - 1; i >= 0; i--)
-            {
-                var task = activeTaskList[i];
-                task?.InterruptTask();
-            }
-
-            activeTaskList.Clear();
         }
     }
 }

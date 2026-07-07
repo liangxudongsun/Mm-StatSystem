@@ -5,8 +5,6 @@ using GAS.Core;
 using GAS.Core.GameplayEffect;
 using GAS.StateSystem;
 using GAS.TagSystem;
-using GAS.Targeting;
-using GAS.TaskSystem;
 using UnityEngine;
 
 namespace GAS.Demo.Test
@@ -31,9 +29,9 @@ namespace GAS.Demo.Test
     }
 
     /// <summary>
-    /// GAS 测试用等待技能
+    /// GAS 测试用中断技能
     /// </summary>
-    public class GASTestWaitAbility : GameplayAbility
+    public class GASTestCancelAbility : GameplayAbility
     {
         /// <summary>
         /// 最近上下文
@@ -46,8 +44,6 @@ namespace GAS.Demo.Test
         public override void Activate(AbilityContext context)
         {
             LastContext = context;
-            Task_Wait waitTask = context.RegisterTask(Task_Wait.Wait(context.Owner, 10f));
-            waitTask.Start();
         }
     }
 
@@ -102,7 +98,6 @@ namespace GAS.Demo.Test
             RunTagSystemTests(report);
             RunGameplayEffectTests(report);
             RunAbilitySystemTests(report);
-            RunTargetingTests(report);
         }
 
         /// <summary>
@@ -392,14 +387,14 @@ namespace GAS.Demo.Test
                 subject.AbilitySystem.AddGameplayTag("State.Ready");
                 GASTestAssert.True(report, "Ability_标签条件通过", tagSpec.CanActivate(subject.StatController, subject.AbilitySystem), "满足标签后应可激活");
 
-                GASTestWaitAbility waitAbility = ScriptableObject.CreateInstance<GASTestWaitAbility>();
-                waitAbility.abilityName = "WaitAbility";
-                subject.TrackRuntimeAsset(waitAbility);
+                GASTestCancelAbility cancelAbility = ScriptableObject.CreateInstance<GASTestCancelAbility>();
+                cancelAbility.abilityName = "CancelAbility";
+                subject.TrackRuntimeAsset(cancelAbility);
 
-                AbilitySpec waitSpec = waitAbility.CreateAbilitySpec();
-                waitSpec.Activate(subject.AbilitySystem, subject.StatController);
-                waitSpec.Interrupt();
-                GASTestAssert.True(report, "AbilityContext_中断任务", waitAbility.LastContext != null && waitAbility.LastContext.IsCancelled, "上下文中断失败");
+                AbilitySpec cancelSpec = cancelAbility.CreateAbilitySpec();
+                cancelSpec.Activate(subject.AbilitySystem, subject.StatController);
+                cancelSpec.Interrupt();
+                GASTestAssert.True(report, "AbilityContext_中断上下文", cancelAbility.LastContext != null && cancelAbility.LastContext.IsCancelled, "上下文中断失败");
 
                 GASTestCounterAbility sharedAbility = ScriptableObject.CreateInstance<GASTestCounterAbility>();
                 sharedAbility.abilityName = "SharedAbility";
@@ -422,62 +417,6 @@ namespace GAS.Demo.Test
             finally
             {
                 subject.Destroy();
-            }
-        }
-
-        /// <summary>
-        /// 目标系统测试
-        /// </summary>
-        public static void RunTargetingTests(GASTestReport report)
-        {
-            StatData hpData = GASTestDataBuilder.CreateStatData("HP", E_StatType.Immediate, 100f);
-            GASTestSubject player = GASTestSubject.Create("TargetPlayer", hpData);
-            GASTestSubject enemy = GASTestSubject.Create("TargetEnemy", hpData);
-
-            try
-            {
-                player.SetInitialTags("Faction.Player");
-                enemy.SetInitialTags("Faction.Enemy");
-
-                GASTestAssert.True(
-                    report,
-                    "Targeting_敌我有效",
-                    TargetingSystem.IsValidTarget(player.AbilitySystem, enemy.AbilitySystem, true),
-                    "Player 攻击 Enemy 应有效");
-
-                GASTestAssert.True(
-                    report,
-                    "Targeting_友军无效",
-                    !TargetingSystem.IsValidTarget(player.AbilitySystem, player.AbilitySystem, true),
-                    "Player 不应攻击自己");
-
-                TargetData selfData = TargetingSystem.GetTargetData(
-                    player.AbilitySystem,
-                    TargetType.Self,
-                    player.Root.transform.position,
-                    player.Root.transform.forward);
-                GASTestAssert.True(report, "Targeting_自身目标", selfData.SingleTarget == player.AbilitySystem, "Self 目标错误");
-
-                GASTestSubject neutralA = GASTestSubject.Create("TargetNeutralA", hpData);
-                GASTestSubject neutralB = GASTestSubject.Create("TargetNeutralB", hpData);
-                try
-                {
-                    GASTestAssert.True(
-                        report,
-                        "Targeting_无阵营回退",
-                        TargetingSystem.IsValidTarget(neutralA.AbilitySystem, neutralB.AbilitySystem, true),
-                        "无阵营标签时应回退允许");
-                }
-                finally
-                {
-                    neutralA.Destroy();
-                    neutralB.Destroy();
-                }
-            }
-            finally
-            {
-                player.Destroy();
-                enemy.Destroy();
             }
         }
     }

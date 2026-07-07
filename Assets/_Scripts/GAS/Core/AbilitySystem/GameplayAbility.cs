@@ -72,7 +72,7 @@ namespace GAS.AbilitySystem
         /// </summary>
         public virtual void InterruptTask(AbilityContext context)
         {
-            context?.CancelActiveTasks();
+            context?.Cancel();
             InterruptTask();
         }
 
